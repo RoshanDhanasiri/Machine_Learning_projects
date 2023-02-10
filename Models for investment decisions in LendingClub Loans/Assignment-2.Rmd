@@ -1,0 +1,1433 @@
+
+library(tidyverse)
+library(lubridate)
+library(ROCR)
+library(data.table)
+library(expss)
+library(ggplot2)
+library(cowplot)
+library(ranger)
+library(dplyr)
+library(splitstackshape)
+library(caret)
+library(rpart)
+library(ranger)
+library(base)
+library(libcoin)
+library(C50)
+
+<!-- install.packages('cowplot') -->
+<!-- install.packages('expss') -->
+<!-- install.packages('ranger') -->
+<!-- install.packages('splitstackshape') -->
+
+setwd('C:/Users/rdhana5/Documents')
+
+lcdf <- read_csv("lcDataSample.csv")
+
+cols_condense(spec(lcdf))
+
+# seeing missing values proportions
+names(lcdf)[colSums(is.na(lcdf))>0]
+# filled value  proportions
+names(lcdf)[colSums(!is.na(lcdf))>0]
+colMeans(is.na(lcdf)) #proportion of na
+#for seeing the data in excel, we are converting the data to data frame
+data.frame(colMeans(is.na(lcdf))[colMeans(is.na(lcdf))>0])
+write.csv(x=data.frame(colMeans(is.na(lcdf))), file="naproportion.csv")
+# Types of Handling the Missing values:
+#1. For the variables with data margins is small and cannot be zero, we can prevent information loss by replacing the missing value with Median. Here missing values in number of revolving accounts and Months since most recent 90 day or worst rating can be replaced with median because 99% and 76% are filled and none of them are zero.
+#2. For Variables which have values only when an event occurs, the missing values can be safely assumed as zero because missing values may have caused due to the non occurance event. some such variables are Months since last inquiry, Months since recent Bankcard.
+#3. Some missing values cannot be replaced. but we cannot leave them as the outputs in some forms cannot show the existance of missing values and causes misinterpretation of the data. So we fill them with a fixed charecter or string to denote the missing value. here we used the string "missing"
+
+
+lcdf<- lcdf %>% replace_na(list(num_rev_accts=median(lcdf$num_rev_accts, na.rm=TRUE)
+                                , revol_util=median(lcdf$revol_util,na.rm=TRUE)
+                                ,hardship_dpd= median(lcdf$hardship_dpd, na.rm=TRUE)
+                                ,settlement_term= median(lcdf$settlement_term, na.rm=TRUE)
+                                ,il_util=median(lcdf$il_util, na.rm=TRUE)
+                                ,max_bal_bc=median(lcdf$max_bal_bc, na.rm=TRUE)
+                                ,all_util=median(lcdf$all_util, na.rm=TRUE)
+                                ,inq_fi=median(lcdf$inq_fi, na.rm=TRUE)
+                                ,total_cu_tl=median(lcdf$total_cu_tl, na.rm=TRUE)
+                                ,bc_util=median(lcdf$bc_util, na.rm=TRUE)
+                                ,bc_open_to_buy=median(lcdf$bc_open_to_buy, na.rm=TRUE)
+                                ,avg_cur_bal=median(lcdf$avg_cur_bal, na.rm=TRUE)
+                                ,pct_tl_nvr_dlq= 0,mtths_since_recent_bc= 0,mths_since_recent_inq = 0
+                                ,open_acc_6m=0, open_act_il=0, open_il_12m=0, open_il_24m=0,total_bal_il=0
+                                ,open_rv_12m=0, open_rv_24m=0, inq_last_12m=0, mths_since_last_record=0
+                                ,mths_since_recent_bc_dlq=0, mths_since_last_major_derog=0, mths_since_recent_revol_delinq=0
+                                , mths_since_last_delinq=0, num_tl_120dpd_2m=0, mo_sin_old_il_acct=0,bc_util=0
+                                ,percent_bc_gt_75=0, bc_open_to_buy=0, mths_since_rcnt_il=0,  mths_since_recent_bc=0,emp_title="missing"
+                                ,purpose= "missing", title="missing" , last_pymnt_d ="missing"))
+
+lcdf$open_acc_6m <- as.character(lcdf$open_acc_6m)
+
+# We can replace missing values in a variable with
+#      replace_na( variable, "value for missing")
+table( replace_na( lcdf$open_acc_6m, "missing") )   # shows the 'missing' values
+
+unique(lcdf$loan_status)
+
+lcdf <- lcdf %>% filter(loan_status == "Fully Paid" | loan_status == "Charged Off")
+
+unique(lcdf$loan_status)
+
+a <- sapply(lcdf, class)
+
+library(ROCR)
+
+a = names(a)[as.character(a) == "numeric"]
+
+b = sapply(a, function(x) {
+  predictions = lcdf[, x][!is.na(lcdf[, x])]
+  labels = lcdf[, "loan_status"][!is.na(lcdf[, x])]
+  pred <- prediction(predictions, labels)
+  performance(pred, "auc")@y.values[[1]]
+})
+
+
+write.csv(exists("data.frame(b)"), file='AUC.csv')
+
+#3 new attributes
+#Proportion of open revolving accounts
+lcdf$prop_act_rev_acc <- lcdf$num_op_rev_tl/lcdf$num_rev_accts
+
+lcdf %>% group_by(loan_status, grade) %>% summarise(avg_act_rev_acc=mean(prop_act_rev_acc))
+
+#Investors Loss
+lcdf$loss <- lcdf$total_pymnt - lcdf$funded_amnt
+lcdf %>% group_by(loan_status, grade) %>% summarise(avg_act_rev_acc=mean(loss))
+
+#proportion of amount received
+lcdf$prop_amt_rec <- (lcdf$total_rec_int + lcdf$total_rec_late_fee + lcdf$total_rec_prncp) / lcdf$funded_amnt
+lcdf %>% group_by(loan_status, grade) %>% summarise(avg_act_rev_acc=mean(prop_amt_rec))
+
+##identifying numeric columns
+num_col <- unlist(lapply(lcdf, is.numeric))  
+data_num <- lcdf[ , num_col]                      
+
+##identifying character columns
+cha_col <- unlist(lapply(lcdf, is.character))
+data_cha<- lcdf[ , cha_col]
+
+#converting datatype from character to factor
+data_cha <- lapply(data_cha, as.factor)
+
+#combining the two types of columns
+nData<-cbind(data_num, data_cha)
+
+
+data_num = ''
+data_cha = ''
+ 
+dim(nData)
+
+
+
+
+
+
+lcdf <- lcdf %>% select_if(function(x){ ! all(is.na(x)) } ) 
+# Drop variables with all empty values
+
+dim(lcdf) 
+# The number of variables that were dropped were 148-115
+
+
+
+#Of the columns remaining, names of columns with missing values
+names(lcdf)[colSums(is.na(lcdf)) > 0]
+
+
+#missing value proportions in each column
+colMeans(is.na(lcdf))
+
+# columns where there are missing values
+colMeans(is.na(lcdf))[colMeans(is.na(lcdf))>0]
+
+
+
+summary(as.factor(lcdf$open_acc_6m))    
+#shows the counts of open_acc_6m by different values of the variable
+
+table(lcdf$open_acc_6m)  
+
+
+x <- lcdf
+
+x$open_acc_6m <- as.character(x$open_acc_6m)
+
+    
+table( replace_na( x$open_acc_6m, "missing") )   
+# replaces missing values with na
+
+table( x$loan_status, replace_na( x$open_acc_6m, "missing") ) 
+# shows counts by loan_status at different values of the variable
+
+#to get a bar-plot of these
+cc<-table( x$loan_status, replace_na( x$open_acc_6m, "missing") )
+barplot(cc, col=c("darkblue","red3"),legend = rownames(cc))  # here, one bar dominates others
+
+barplot(cc[1,]/(cc[2,]+cc[1,]), legend = rownames(cc), ylab = "prop ChargedOff", main="Prop ChargedOff by open_acc_6m")
+#proportion of charged off accounts by open accounts
+
+
+
+
+#  Variable mths_since_last_record has more than 80% values missing
+cc<-table( lcdf$loan_status, replace_na( lcdf$mths_since_last_record, "missing") )
+cc[1,]/(cc[2,]+cc[1,])
+
+
+#For mths_since_last_delinq, which has around 50% values missing 
+cc<-table( lcdf$loan_status, replace_na( lcdf$mths_since_last_delinq, "missing") )
+cc[1,]/(cc[2,]+cc[1,])
+
+#For mths_since_recent_inq, which has around 10% values missing
+cc<-table( lcdf$loan_status, replace_na( lcdf$mths_since_recent_inq, "missing") )
+cc[1,]/(cc[2,]+cc[1,])
+
+
+
+nm<-names(lcdf)[colMeans(is.na(lcdf))>0.6]
+lcdf <- lcdf %>% select(-all_of(nm))
+#removing variables with more than 60% missing values
+
+
+
+
+
+colMeans(is.na(lcdf))[colMeans(is.na(lcdf))>0]
+#for columns with missing values
+
+#summary of data in these columns
+nm<- names(lcdf)[colSums(is.na(lcdf))>0]
+summary(lcdf[, nm])
+
+
+
+lcx <-lcdf[, c(nm)]
+lcx<- lcx %>% replace_na(list(bc_open_to_buy=median(lcx$bc_open_to_buy, na.rm=TRUE))) 
+#replacing missing values with median and storing in a temporary data set to check if it works
+
+lcdf<- lcdf %>% replace_na(list(mths_since_last_delinq=median(lcdf$mths_since_last_delinq, na.rm=TRUE), bc_open_to_buy=median(lcdf$bc_open_to_buy, na.rm=TRUE), mo_sin_old_il_acct=median(lcdf$mo_sin_old_il_acct, na.rm=TRUE), mths_since_recent_bc=median(lcdf$mths_since_recent_bc, na.rm=TRUE), mths_since_recent_inq=median(lcdf$mths_since_recent_inq, na.rm=TRUE), num_tl_120dpd_2m = median(lcdf$num_tl_120dpd_2m, na.rm=TRUE), percent_bc_gt_75 = median(lcdf$percent_bc_gt_75, na.rm=TRUE), bc_util=median(lcdf$bc_util, na.rm=TRUE)))
+
+
+
+
+colMeans(is.na(lcdf))[colMeans(is.na(lcdf))>0]
+#there are still missing values in a few columns
+
+
+#Variables with missing values
+nm<-names(lcdf)[colMeans(is.na(lcdf))>0]
+glimpse(lcdf %>% select(nm))
+# these are all numeric variables  
+
+#To replace the few missing values in a column by the column median values
+
+lcx <- lcdf  #copy to lcx
+lcx<- lcx %>% mutate_if(is.numeric,  ~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))
+# replacing missing values with median value in that column
+
+
+dim(lcdf)  #how many variables left 
+
+
+#Treating missing NA values
+
+#missing value proportions in each column
+colMeans(is.na(lcdf))
+# for only those columns where there are missing values
+colMeans(is.na(lcdf))[colMeans(is.na(lcdf))>0]
+
+#remove variables which have more than 60% missing values
+nm<-names(lcdf)[colMeans(is.na(lcdf))>0.6]
+lcdf <- lcdf %>% select(-nm)
+
+
+
+
+lcdf <- lcdf %>% select(-c(funded_amnt_inv, term, emp_title, pymnt_plan,hardship_flag, title, zip_code, 
+                           title, out_prncp, out_prncp_inv,total_pymnt, total_pymnt_inv, total_rec_prncp,
+                           total_rec_int,total_rec_late_fee, recoveries, collection_recovery_fee, 
+                           last_pymnt_d, last_pymnt_amnt, last_credit_pull_d, policy_code))
+
+
+lcdf<-lcdf %>% select(-c(installment,emp_length,verification_status,issue_d))
+
+
+lcdf<-lcdf %>% select(-c(num_tl_30dpd,acc_now_delinq,chargeoff_within_12_mths,
+                         num_tl_90g_dpd_24m,delinq_amnt,tax_liens,pub_rec,delinq_2yrs,
+                         initial_list_status,tot_coll_amt,num_accts_ever_120_pd,mths_since_last_delinq,
+                         mths_since_recent_inq,percent_bc_gt_75,debt_settlement_flag,earliest_cr_line,
+                         pub_rec_bankruptcies, application_type,last_fico_range_high,
+                         inq_last_6mths,collections_12_mths_ex_med,mo_sin_old_il_acct))
+
+
+# To drop some variables for potential leakage, others
+varsToRemove = c('earliest_cr_line', 'addr_state', 'disbursement_method', 'debt_settlement_flag', 'application_type')
+
+
+
+# Dropping variables like last_pymnt_d, last_pymnt_amnt, next_pymnt_d, deferral_term, payment_plan_start_date, 
+
+
+#Drop them from the lcdf data-frame
+
+
+lcdf <- lcdf %>% select(-all_of(varsToRemove))  
+
+
+lcdf <- lcdf %>% select(-starts_with("hardship"))
+
+#Dropping all variables starting with "settlement"
+
+lcdf <- lcdf %>% select(-starts_with("settlement"))
+
+
+varsToRemove%>%as_tibble()%>%View()  
+
+
+
+
+
+
+##Removing Leakage variables (LR-Leakage removed)
+drops <- c("hardship_start_date","hardship_end_date","deferral_term","hardship_amount","hardship_status","hardship_type"
+           ,"hardship_reason","sec_app_mths_since_last_major_derog","sec_app_collections_12_mths_ex_med"
+           ,"sec_app_chargeoff_within_12_mths","sec_app_num_rev_accts","sec_app_open_act_il","sec_app_revol_util"
+           ,"sec_app_open_acc","sec_app_mort_acc","sec_app_inq_last_6mths","sec_app_earliest_cr_line","revol_bal_joint"
+           ,"dti_joint","annual_inc_joint","next_pymnt_d","url","desc","orig_projected_additional_accrued_interest"
+           ,"payment_plan_start_date","settlement_status","settlement_amount","hardship_payoff_balance_amount"
+           ,"hardship_loan_status","hardship_length","settlement_percentage","debt_settlement_flag_date"
+           ,"hardship_last_payment_amount","id", "member_id","recoveries", "collection_recovery_fee", "last_credit_pull_d"
+           ,"debt_settlement_flag","total_rec_prncp", "total_pymnt"
+           ,"total_pymnt_inv","total_rec_int","issue_d","last_pymnt_amnt"
+           ,"last_pymnt_d", "total_rec_late_fee","funded_amnt", "installment", 'actualTerm', 'annualRet', 'prop_amt_rec'
+           , 'loss', 'prop_act_rev_acc', 'funded_amnt_inv', 'dti_joint', 'annRet', 'avg_cur_bal'
+           ,'bc_util', 'tot_cur_bal', 'num_rev_tl_bal_gt_0', 'term')
+
+nDataLR <- nData[ , !(names(nData) %in% drops)]
+
+drop <- c ("pymnt_plan","hardship_flag","disbursement_method","term","zip_code","addr_state")
+
+nDataLR <- nData[ , !(names(nData) %in% drop)]
+
+nDataLR <- nDataLR %>% subset(select = c(names(nDataLR)[colSums(!is.na(nDataLR))>0]))
+
+nmDataLR <- nDataLR[1:109944,]
+
+
+library(dplyr)
+
+exp <- nmDataLR %>%
+  select(loan_amnt, int_rate, annual_inc, dti , total_pymnt, mths_since_last_major_derog , loan_status , grade , sub_grade )
+
+install.packages('xgboost')
+
+<!-- fdum <- dummyVars ( ~. , data=lcdf %>% select(-loan_status)) #do not include loan_status for this -->
+<!-- dxlcdf <- predict ( fdum, lcdf) -->
+
+<!-- # dummify the data -->
+<!-- dmy <- dummyVars(" ~ .", data = customers) -->
+<!-- trsf <- data.frame(predict(dmy, newdata = customers)) -->
+<!-- print(trsf) -->
+
+library('xgboost')
+
+fdum<-dummyVars(~.,data=exp %>% select(-loan_status))
+
+dxlcdf <- predict(fdum, exp)
+
+
+
+levels(exp$loan_status)
+
+dylcdf <- class2ind(exp$loan_status, drop2nd = FALSE)
+
+colcdf <- dylcdf [ , 1] 
+
+dylcdf [10:15,]
+
+
+TRNPROP = 0.75  
+#proportion of examples in the training sample
+
+nr<-nrow(lcdf)
+trnIndex<- sample(1:nr, size = round(TRNPROP * nr), replace=FALSE)
+
+
+lcdfTrn <- lcdf[trnIndex, ]
+lcdfTst <- lcdf[-trnIndex, ]
+
+
+#Training, test subsets
+dxlcdfTrn <- dxlcdf[trnIndex,]
+
+colcdfTrn <- colcdf[trnIndex]
+dxlcdfTst <- dxlcdf[-trnIndex,]
+colcdfTst <- colcdf[-trnIndex]
+
+dxTrn <- xgb.DMatrix( subset(dxlcdfTrn, select=-c(total_pymnt)), label=colcdfTrn)
+dxTst <- xgb.DMatrix( subset( dxlcdfTst,select=-c(total_pymnt)), label=colcdfTst)
+
+xgbWatchlist <- list(train = dxTrn, eval = dxTst)
+
+xgbParam <- list (
+max_depth = 5, eta = 0.01,
+objective = "binary:logistic", min_child_weight=1, subsample=1, colsample_bytree=1,
+eval_metric="error", eval_metric = "auc")
+
+xgb_lsM1 <- xgb.train( xgbParam, dxTrn, nrounds = 500,
+xgbWatchlist, early_stopping_rounds = 10 )
+
+xgb_lsM1$best_iteration
+
+xpredTrg<-predict(xgb_lsM1, dxTrn) # best_iteration is used
+
+head(xpredTrg)
+
+#confusion matrix
+table(pred=as.numeric(xpredTrg>0.5), act=lcdfTrn$loan_status)
+
+#ROC, AUC performance
+xpredTst<-predict(xgb_lsM1, dxTst)
+
+pred_xgb_lsM1 = prediction(xpredTst, lcdfTst$loan_status, label.ordering = c("Fully Paid", "Charged Off"))
+
+aucPerf_xgb_lsM1=performance(pred_xgb_lsM1, "tpr", "fpr")
+
+plot(aucPerf_xgb_lsM1)
+abline(a=0, b= 1)
+
+#use cross-validation on training dataset to determine best model
+
+xgbParam <- list (
+max_depth = 3, eta = 0.1,
+objective = "binary:logistic", min_child_weight=1, subsample=1, colsample_bytree=1,
+eval_metric="error", eval_metric = "auc")
+
+xgb_lscv <- xgb.cv( xgbParam, dxTrn, nrounds = 500, nfold=5, early_stopping_rounds = 10 )
+
+#best iteration
+xgb_lscv$best_iteration
+
+# or for the best iteration based on performance measure (among those specified in xgbParam)
+best_cvIter <- which.max(xgb_lscv$evaluation_log$test_auc_mean)
+
+which.min(xgb_lscv$evaluation_log$test_error_mean)
+
+xgb_lsbest <- xgb.train( xgbParam, dxTrn, nrounds = xgb_lscv$best_iteration )
+
+
+#variable importance
+xgb.importance(model = xgb_lsbest) %>% view()
+
+<!-- booster = "gbtree", objective = "binary:logistic", eta=0.3, gamma=0, max_depth=6, min_child_weight=1, subsample=1, colsample_bytree=1 -->
+
+
+xgbParam <- list (
+max_depth = 4, #eta = 0.01,
+objective = "binary:logistic", min_child_weight=1, subsample=1, colsample_bytree=1,
+eval_metric="error", eval_metric = "auc")
+
+
+xgb_lsM1 <- xgb.train( xgbParam, dxTrn, nrounds = 500,
+xgbWatchlist, early_stopping_rounds = 10, eta=1 )
+
+xgbParam <- list (max_depth = 4, #eta = 0.01,
+objective = "binary:logistic",
+eval_metric="auc", eval_metric = "error")
+
+xgb_lsM1 <- xgb.train( xgbParam, dxTrn, nrounds = 500,
+xgbWatchlist, early_stopping_rounds = 10, eta=1 )
+
+xgb_lsM1 <- xgb.train( xgbParam, dxTrn, nrounds = 500, xgbWatchlist,
+early_stopping_rounds = 10, eta=0.5 )
+
+xgb_lsM1 <- xgb.train( xgbParam, dxTrn, nrounds = 500, xgbWatchlist,
+early_stopping_rounds = 10, eta=0.1 )
+
+xgb_lsM1 <- xgb.train( xgbParam, dxTrn, nrounds = 500, xgbWatchlist,
+early_stopping_rounds = 10, eta=0.01 )
+
+xgb_lsM1 <- xgb.train( xgbParam, dxTrn, nrounds = 500, xgbWatchlist,
+early_stopping_rounds = 10, eta=0.1, max_depth=6 )
+
+
+**
+
+xgb_lsM1 <- xgboost(param = xgbParam, data = dxTrn, nrounds = 500)
+
+**
+
+
+xgbParamGrid <- expand.grid(
+max_depth = c(2, 5),
+eta = c(0.001, 0.01, 0.1) )
+
+xgbParamGrid
+
+xgbParams <- list (
+booster = "gbtree",
+objective = "reg:squarederror",
+#eta=0.01, #learning rate
+#max_depth=5,
+min_child_weight=1,
+colsample_bytree=0.6,
+)
+
+for(i in 1:nrow(xgbParamGrid)) {
+xgb_tune<- xgboost(data=dtrain, objective = "reg:squarederror", nrounds=50, eta=xgbParamGrid$eta[i],
+max_depth=xgbParamGrid$max_depth[i], early_stopping_rounds = 10)
+xgbParamGrid$bestTree[i] <- xgb_tune$evaluation_log[xgb_tune$best_iteration]$iter
+xgbParamGrid$bestPerf[i] <- xgb_tune$evaluation_log[xgb_tune$best_iteration]$train_rmse
+}
+
+xgbParamGrid
+
+
+
+
+######################################################2(GLM)########################################################
+
+#for a factor dependent var, the second level in alpha order is taken as the '1' (target)
+#We can specifically encode the dependent var here to make sure that 1 is for "Fully Paid"
+
+
+
+<!-- install.packages("glmnet") -->
+
+library(glmnet)
+library(tidyr)
+library(tidyr)
+library(purrr)
+library(tidyverse)
+lcdfTrn <- na.omit(lcdfTrn) 
+
+yTrn<-factor(if_else(lcdfTrn$loan_status=="Fully Paid", '1', '0') )
+
+xDTrn<-lcdfTrn %>% select(-loan_status)
+
+colSums(is.na(xDTrn))
+
+glmls_cv<- cv.glmnet(data.matrix(xDTrn), yTrn, family="binomial")
+
+
+<!-- glmls_cv$lambda.min -->
+
+<!-- [1] 8.268126e-05 -->
+
+<!-- glmls_cv$lambda.1se -->
+
+<!-- [1] 0.007892327 -->
+
+coef(glmls_cv, s = glmls_cv$lambda.1se)
+
+coef(glmls_cv, s = glmls_cv$lambda.min)
+
+
+plot(glmls_cv)
+
+
+as.matrix(coef(glmls_cv, s = glmls_cv$lambda.min))
+
+
+
+tidy(coef(glmls_cv, s = glmls_cv$lambda.1se))
+
+
+glmls_cv$glmnet.fit
+
+
+
+#df: # variables in the model
+#%dev: the percent (of null) deviance explained 
+#dev.ratio = 1-deviance/nulldev
+#nulldev: deviance of the null model (with only the intercept term)
+
+#So, as the extent of regularization (lambda) decreases, we’d expect the %Dev to increase.
+
+#‘Best’ lambda can be lambda.min, 
+#or we can consider lambda.1se (within 1 std error of the min loss)
+
+glmls_cv$lambda.1se
+ 
+<!-- [1] 0.009506335 -->
+
+which(glmls_cv$lambda == glmls_cv$lambda.1se)
+
+<!-- [1] 23 -->
+
+glmls_cv$glmnet.fit$dev.ratio[which(glmls_cv$lambda == glmls_cv$lambda.1se) ]
+
+<!-- [1] 0.06063439 -->
+#The lambda.1se value
+#Index to the lambda.1se value. 
+#Note: glmls_cv$lambda gives the sequence of lambda values experimented with. 
+#The dev.ratio corresponding to the lambda.1se value
+
+plot(glmls_cv$glmnet.fit)
+
+plot(glmls_cv$glmnet.fit, xvar="lambda")
+
+
+plot(glmls_cv$glmnet.fit, xvar="dev")
+
+
+
+glmls_cv_auc<- cv.glmnet(data.matrix(xDTrn), yTrn, family="binomial", type.measure = "auc")
+
+plot(glmls_cv_auc)
+
+
+#the labmda values used are in glmls_cv$lambda
+
+glmls_cv_auc$lambda
+
+# and the cross-validation 'loss' at each lambda is in glmls_cv$cvm
+
+glmls_cv_auc$cvm
+
+#So, to get the 'loss' value at lambda == lambda.1se
+
+glmls_cv_auc$cvm [ which(glmls_cv_auc$lambda == glmls_cv_auc$lambda.1se) ]
+
+
+
+<!-- Predictions -->
+
+glmPredls_1=predict ( glmls_cv,data.matrix(xDTrn), s="lambda.min" ) # gives the ln(p/(1-p)) values
+
+#i.e. the values of w1*x1 + ...+w2*x2
+
+glmPredls_p=predict(glmls_cv,data.matrix(xDTrn), s="lambda.min", type="response" ) #gives the prob values
+
+glmPredls_1 <- predict(glmls_cv, data.matrix(xDTrn), s="lambda.min")
+
+
+glmPredls_1p <- predict(glmls_cv, data.matrix(xDTrn), s="lambda.min", type ="response")
+
+predsauc <- prediction(glmPredls_1p, lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+
+aucPerf <- performance(predsauc, "auc')s
+
+auc@y.values
+
+
+
+#glmnet, glmnet.cv
+
+glmls_1 <- glmnet(data.matrix(x), lcx, family="binomial", lambda = glmls_cv$lambda.1se )
+
+glmls_1
+
+Call: 
+
+glmnet(x = data.matrix(xDTrn), y = yTrn, family = "binomial", lambda = glmls_cv$lambda.1se) 
+
+Df %Dev Lambda
+[1,] 11 0.06062 0.009506
+
+#Compare with coefficients from glmls_cv for lambda=lambda.1se
+
+#Compared with coefficients from glmls_cv for lambda=lambda.1se
+#- similar, but not exactly the same
+#If we specify the same sequence of lambda values, the coeffs will be same.
+
+glmls_1 <- glmnet(data.matrix(xDTrn), yTrn, family="binomial", lambda = glmls_cv$lambda)
+
+tidy(coef(glmls_1, s= glmls_cv$lambda.1se))
+
+library(tidyr)
+
+library(tidyverse)
+
+library(broom)
+
+#get the names of variables with non-zero coefficients from the regularized model
+
+nzCoef <- tidy(coef(glmls_cv, s= glmls_cv$lambda.1se))
+
+nzCoefVars <- nzCoef[-1,1] 
+## same as: nzCoefVars<-nzCoef[,1] and then nzCoefVars<-nzCoefVars[-1]
+
+#Develop a linear model without regularization
+glmls_nzv_2 <- glm(yTrn ~ data.matrix( xDTrn %>% select(nzCoefVars)), family=binomial())
+
+#Or we can use glm.fit(..) with X and y variables (no formula)
+glmls_nzv <- glm.fit (data.matrix(xDTrn %>% select(nzCoefVars)), yTrn, family=binomial())
+
+
+summary(glmls_nzv_2)
+
+Call:
+
+glm(formula = yTrn ~ data.matrix(xDTrn %>% select(nzCoefVars)), 
+family = binomial())
+
+
+#################################################################################################
+
+
+lcdfMr <- read_csv("lcDataSample.csv")
+
+
+lcdfMr <- lcdfMr %>% select_if(function(x){ ! all(is.na(x)) } ) 
+# Drop variables with all empty values
+
+dim(lcdfMr) 
+# The number of variables that were dropped were 148-115
+
+
+
+#Of the columns remaining, names of columns with missing values
+names(lcdfMr)[colSums(is.na(lcdfMr)) > 0]
+
+
+#missing value proportions in each column
+colMeans(is.na(lcdfMr))
+
+# columns where there are missing values
+colMeans(is.na(lcdfMr))[colMeans(is.na(lcdfMr))>0]
+
+
+
+summary(as.factor(lcdfMr$open_acc_6m))    
+#shows the counts of open_acc_6m by different values of the variable
+
+table(lcdfMr$open_acc_6m)  
+
+
+x <- lcdfMr
+
+x$open_acc_6m <- as.character(x$open_acc_6m)
+
+    
+table( replace_na( x$open_acc_6m, "missing") )   
+# replaces missing values with na
+
+table( x$loan_status, replace_na( x$open_acc_6m, "missing") ) 
+# shows counts by loan_status at different values of the variable
+
+#to get a bar-plot of these
+cc<-table( x$loan_status, replace_na( x$open_acc_6m, "missing") )
+barplot(cc, col=c("darkblue","red3"),legend = rownames(cc))  # here, one bar dominates others
+
+barplot(cc[1,]/(cc[2,]+cc[1,]), legend = rownames(cc), ylab = "prop ChargedOff", main="Prop ChargedOff by open_acc_6m")
+#proportion of charged off accounts by open accounts
+
+
+
+
+#  Variable mths_since_last_record has more than 80% values missing
+cc<-table( lcdfMr$loan_status, replace_na( lcdfMr$mths_since_last_record, "missing") )
+cc[1,]/(cc[2,]+cc[1,])
+
+
+#For mths_since_last_delinq, which has around 50% values missing 
+cc<-table( lcdfMr$loan_status, replace_na( lcdfMr$mths_since_last_delinq, "missing") )
+cc[1,]/(cc[2,]+cc[1,])
+
+#For mths_since_recent_inq, which has around 10% values missing
+cc<-table( lcdfMr$loan_status, replace_na( lcdfMr$mths_since_recent_inq, "missing") )
+cc[1,]/(cc[2,]+cc[1,])
+
+
+
+nm<-names(lcdfMr)[colMeans(is.na(lcdfMr))>0.6]
+lcdfMr <- lcdfMr %>% select(-all_of(nm))
+#removing variables with more than 60% missing values
+
+
+
+
+
+colMeans(is.na(lcdfMr))[colMeans(is.na(lcdfMr))>0]
+#for columns with missing values
+
+#summary of data in these columns
+nm<- names(lcdfMr)[colSums(is.na(lcdfMr))>0]
+summary(lcdfMr[, nm])
+
+
+
+lcx <-lcdfMr[, c(nm)]
+lcx<- lcx %>% replace_na(list(bc_open_to_buy=median(lcx$bc_open_to_buy, na.rm=TRUE))) 
+#replacing missing values with median and storing in a temporary data set to check if it works
+
+lcdfMr<- lcdfMr %>% replace_na(list(mths_since_last_delinq=median(lcdfMr$mths_since_last_delinq, na.rm=TRUE), bc_open_to_buy=median(lcdfMr$bc_open_to_buy, na.rm=TRUE), mo_sin_old_il_acct=median(lcdfMr$mo_sin_old_il_acct, na.rm=TRUE), mths_since_recent_bc=median(lcdfMr$mths_since_recent_bc, na.rm=TRUE), mths_since_recent_inq=median(lcdfMr$mths_since_recent_inq, na.rm=TRUE), num_tl_120dpd_2m = median(lcdfMr$num_tl_120dpd_2m, na.rm=TRUE), percent_bc_gt_75 = median(lcdfMr$percent_bc_gt_75, na.rm=TRUE), bc_util=median(lcdfMr$bc_util, na.rm=TRUE)))
+
+
+
+
+colMeans(is.na(lcdfMr))[colMeans(is.na(lcdfMr))>0]
+#there are still missing values in a few columns
+
+
+#Variables with missing values
+nm<-names(lcdfMr)[colMeans(is.na(lcdfMr))>0]
+glimpse(lcdfMr %>% select(nm))
+# these are all numeric variables  
+
+#To replace the few missing values in a column by the column median values
+
+lcx <- lcdfMr  #copy to lcx
+lcx<- lcx %>% mutate_if(is.numeric,  ~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))
+# replacing missing values with median value in that column
+
+
+dim(lcdfMr)  #how many variables left 
+
+
+#Treating missing NA values
+
+#missing value proportions in each column
+colMeans(is.na(lcdfMr))
+# for only those columns where there are missing values
+colMeans(is.na(lcdfMr))[colMeans(is.na(lcdfMr))>0]
+
+#remove variables which have more than 60% missing values
+nm<-names(lcdfMr)[colMeans(is.na(lcdfMr))>0.6]
+lcdfMr <- lcdfMr %>% select(-nm)
+
+
+
+
+lcdfMr <- lcdfMr %>% select(-c(funded_amnt_inv, term, emp_title, pymnt_plan,hardship_flag, title, zip_code, 
+                           title, out_prncp, out_prncp_inv, total_pymnt_inv, total_rec_prncp,
+                           total_rec_int,total_rec_late_fee, recoveries, collection_recovery_fee, 
+                           last_pymnt_d, last_pymnt_amnt, last_credit_pull_d, policy_code))
+
+lcdfMr<-lcdfMr %>% select(-c(installment,emp_length,verification_status,issue_d))
+
+
+lcdfMr<-lcdfMr %>% select(-c(num_tl_30dpd,acc_now_delinq,chargeoff_within_12_mths,
+                         num_tl_90g_dpd_24m,delinq_amnt,tax_liens,pub_rec,delinq_2yrs,
+                         initial_list_status,tot_coll_amt,num_accts_ever_120_pd,mths_since_last_delinq,
+                         mths_since_recent_inq,percent_bc_gt_75,debt_settlement_flag,earliest_cr_line,
+                         pub_rec_bankruptcies, application_type,last_fico_range_high,
+                         inq_last_6mths,collections_12_mths_ex_med,mo_sin_old_il_acct))
+
+
+# To drop some variables for potential leakage, others
+varsToRemove = c('earliest_cr_line', 'addr_state', 'disbursement_method', 'debt_settlement_flag', 'application_type')
+
+
+# Dropping variables like last_pymnt_d, last_pymnt_amnt, next_pymnt_d, deferral_term, payment_plan_start_date, 
+
+
+#Drop them from the lcdfMr data-frame
+
+lcdfMr <- lcdfMr %>% select(-all_of(varsToRemove))  
+
+
+lcdfMr <- lcdfMr %>% select(-starts_with("hardship"))
+
+#Dropping all variables starting with "settlement"
+
+lcdfMr <- lcdfMr %>% select(-starts_with("settlement"))
+
+
+varsToRemove%>%as_tibble()%>%View()
+
+###################################################################################
+
+
+#actualReturn: (lcdfMr$total_pymnt - lcdfMr$funded_amnt)
+
+lcdfMr$actualReturn <- lcdfMr$total_pymnt -lcdfMr$funded_amnt
+
+lcdfMr$actualReturn %>% head()
+
+#annRet: Annualized percentage return
+
+lcdfMr$annRet <- ((lcdfMr$total_pymnt -lcdfMr$funded_amnt)/lcdfMr$funded_amnt)*(12/36)*100 
+
+lcdfMr$annRet %>% head()
+
+
+
+
+
+<!-- Model to Predict actualReturns -->
+
+xD<-lcdfMr %>% select(-loan_status, -actualReturn, -total_pymnt)
+
+xD<-lcdfMr %>% select(-loan_status)
+
+glmRet_cv<- cv.glmnet(data.matrix(xD), lcdfMr$actualReturn, family="gaussian")
+
+plot(glmRet_cv)
+
+
+glmRet_cv$lambda.min
+
+[1] 8.00019e-05
+
+glmRet_cv$lambda.1se
+
+[1] 0.3800739
+
+#Set alpha=0 (ridge regression)
+glmRet_cv_a0<- cv.glmnet(data.matrix(xD), lcdfMr$actualReturn, family="gaussian", alpha=0)
+
+glmRet_cv_a0$lambda.min
+
+[1] 0.0800019
+
+glmRet_cv_a0$lambda.1se
+
+[1] 198.1708
+
+
+glmRet_cv_a2<- cv.glmnet(data.matrix(xD), lcdfMr$actualReturn, family="gaussian", alpha=0.2)
+
+
+glmRet_a5<- glmnet(data.matrix(xD), lcdfMr$actualReturn, 
+family="gaussian", alpha=0.5)
+
+plot(glmRet_a5)
+
+<!-- Glm model with subset of variables (non-zero coeff from regularized model) -->
+
+#non-zero coefficients
+
+vars_nz<-coef(glmRet_cv_a5, s="lambda.1se") %>% tidy()
+
+vars_nz <- vars_nz[-1,1]
+
+glmRet_a5_nzv <- glm( lcdfTrn$actualReturn ~ data.matrix(xD %>% select(nzCoefVars)), family=gaussian())
+
+summary(glmRet_a5_nzv)
+
+
+qqnorm(xDTrn$int_rate)
+qqline(xDTrn$int_rate)
+
+
+qqnorm(lcdfMr$dti)
+qqline(lcdfMr$dti)
+
+qqnorm(lcdfMr$acc_open_past_24mths)
+qqline(lcdfMr$acc_open_past_24mths)
+
+<!-- Correlation -->
+
+
+install.packages("corrplot")
+
+library(corrplot)
+
+xCorr <- xDTrn %>% select_if(is.numeric) %>% cor()
+
+corrplot(xCorr, method="circle")
+
+corrTH = 0.6
+xCorr[upper.tri(xCorr, diag=TRUE)] <- NA #set the upper-diagonal values to NA
+
+xCorr <- as.data.frame(as.table(xCorr))
+
+xCorr <- na.omit(xCorr) #remove the rows corresponding to NA values
+
+xCorr_th <- xCorr %>% filter(abs(Freq) > corrTH ) #remove the rows with abs(values) < corrTH
+
+xCorr_th <- xCorr_th[order(-abs(xCorr_th$Freq)),] #order by the corr values
+
+#Convert back to matrix form to use with corrPlot
+xCorrMat <- xCorr_th %>% pivot_wider(names_from = Var2, values_from = Freq)
+
+xCorrMat<-column_to_rownames(xCorrMat, var="Var1") #convert first column to rownames
+
+
+corrplot(as.matrix(xCorrMat), is.corr=FALSE, na.label=" ", method="circle")
+
+
+<!-- Priniciple components -->
+
+xDTrn<-lcdfMr %>% select(-loan_status, -annRet, -actualReturn, -total_pymnt)
+
+fdum<-dummyVars(~.,data=xDTrn) 
+
+xDnTrn <- predict(fdum, xDTrn)
+
+#perform PCA
+xD_pca <-prcomp (xDnTrn,scale=TRUE )
+
+#view the eigenvectors
+view(xD_pca$rotation)
+
+
+#stdev of principal components
+xD_pca$sdev
+plot(xD_pca, type="lines")
+
+#cumulative stdev explained by pcas
+cumsum(xD_pca$sdev/sum(xD_pca$sdev))
+
+#Plot the cumulative variance
+plot(cumsum(xD_pca$sdev/sum(xD_pca$sdev)))
+
+#better plot with labels
+plot( cumsum(xD_pca$sdev/sum(xD_pca$sdev)), ylab = "Cumulaive variance %", xlab = "# components")
+abline(h=0.9, lty=2) # line to indicate 90% of cumulatve variance
+
+
+
+fviz_pca_var(xD_pca) #shows all the variables
+
+fviz_pca_var(xD_pca, select.var = list(cos2=20)) #cos2 indicates top 20
+
+fviz_pca_var(xD_pca, select.var = list(cos2=20),
+col.var = "contrib", # Color by contributions to the pr components
+repel=TRUE ) #avoid text label overlaps
+
+fviz_pca_var(xD_pca, select.var = list(cos2=20))
+#cos2 indicates top 20
+
+
+#####################################################(3)#################################
+
+#######################Lending Club case -- Predict ActualReturn############################
+
+
+lcdfT <- read.csv("lcDataSample.csv")
+
+#actualReturn: (lcdf$total_pymnt - lcdf$funded_amnt)
+
+lcdfT$actualReturn <- lcdfT$total_pymnt -lcdfT$funded_amnt
+
+lcdfT$actualReturn %>% head()
+
+#annRet: Annualized percentage return
+
+lcdfT$annRet <- ((lcdfT$total_pymnt -lcdfT$funded_amnt)/lcdfT$funded_amnt)*(12/36)*100 
+
+lcdfT$annRet %>% head()
+
+
+#lcdf$last_pymnt_d
+#lcdf$issue_d
+
+head(lcdfT[, c("last_pymnt_d", "issue_d")]) #checking formats of last payment and issue dates.
+
+lcdfT$last_pymnt_d<-paste(lcdfT$last_pymnt_d, "-01", sep = "")
+
+lcdfT$last_pymnt_d<-parse_date_time(lcdfT$last_pymnt_d,  "myd")
+
+head(lcdfT[, c("last_pymnt_d", "issue_d")])
+
+
+lcdfT %>% group_by(emp_length) %>% summarise(avg_loan_amount=mean(loan_amnt)) %>% View() # Average loan amounts for each class of employment length
+
+lcdfT$actualTerm <- ifelse(lcdfT$loan_status=="Fully Paid", as.duration(lcdfT$issue_d  %--% lcdfT$last_pymnt_d)/dyears(1), 3)
+
+lcdfT$actualReturn <- ifelse(lcdfT$actualTerm>0, ((lcdfT$total_pymnt -lcdfT$funded_amnt)/lcdfT$funded_amnt)*(1/lcdfT$actualTerm)*100, 0)
+
+lcdfT$annRet <- ((lcdfT$total_pymnt -lcdfT$funded_amnt)/lcdfT$funded_amnt)*(12/36)*100
+
+
+head(lcdfT[, c("actualTerm")])
+
+
+
+lcdfT %>% select(last_pymnt_d, issue_d)
+
+ggplot(lcdfT, aes( x = actualTerm)) +
+  geom_boxplot(aes(fill=grade))
+
+lcdfT$actualTerm
+
+library(ranger)
+
+
+<!-- Missing Values -->
+
+
+lcdfT <- lcdfT %>% select_if(function(x){ ! all(is.na(x)) } ) 
+# Drop variables with all empty values
+
+dim(lcdfT)
+
+# The number of variables that were dropped were 148-115
+
+
+
+#Of the columns remaining, names of columns with missing values
+names(lcdfT)[colSums(is.na(lcdfT)) > 0]
+
+
+#missing value proportions in each column
+colMeans(is.na(lcdfT))
+
+# columns where there are missing values
+colMeans(is.na(lcdfT))[colMeans(is.na(lcdfT))>0]
+
+
+
+summary(as.factor(lcdfT$open_acc_6m))    
+#shows the counts of open_acc_6m by different values of the variable
+
+table(lcdfT$open_acc_6m)  
+
+
+x <- lcdfT
+
+x$open_acc_6m <- as.character(x$open_acc_6m)
+
+    
+table( replace_na( x$open_acc_6m, "missing") )   
+# replaces missing values with na
+
+table( x$loan_status, replace_na( x$open_acc_6m, "missing") ) 
+# shows counts by loan_status at different values of the variable
+
+#to get a bar-plot of these
+cc<-table( x$loan_status, replace_na( x$open_acc_6m, "missing") )
+barplot(cc, col=c("darkblue","red3"),legend = rownames(cc))  # here, one bar dominates others
+
+barplot(cc[1,]/(cc[2,]+cc[1,]), legend = rownames(cc), ylab = "prop ChargedOff", main="Prop ChargedOff by open_acc_6m")
+#proportion of charged off accounts by open accounts
+
+
+
+
+#  Variable mths_since_last_record has more than 80% values missing
+cc<-table( lcdfT$loan_status, replace_na( lcdfT$mths_since_last_record, "missing") )
+cc[1,]/(cc[2,]+cc[1,])
+
+
+#For mths_since_last_delinq, which has around 50% values missing 
+cc<-table( lcdfT$loan_status, replace_na( lcdfT$mths_since_last_delinq, "missing"))
+cc[1,]/(cc[2,]+cc[1,])
+
+#For mths_since_recent_inq, which has around 10% values missing
+cc<-table( lcdfT$loan_status, replace_na( lcdfT$mths_since_recent_inq, "missing"))
+cc[1,]/(cc[2,]+cc[1,])
+
+
+
+nm<-names(lcdfT)[colMeans(is.na(lcdfT))>0.6]
+lcdfT <- lcdfT %>% select(-all_of(nm))
+#removing variables with more than 60% missing values
+
+
+
+
+
+colMeans(is.na(lcdfT))[colMeans(is.na(lcdfT))>0]
+#for columns with missing values
+
+#summary of data in these columns
+nm<- names(lcdfT)[colSums(is.na(lcdfT))>0]
+summary(lcdfT[, nm])
+
+
+
+lcx <-lcdfT[, c(nm)]
+lcx<- lcx %>% replace_na(list(bc_open_to_buy=median(lcx$bc_open_to_buy, na.rm=TRUE))) 
+#replacing missing values with median and storing in a temporary data set to check if it works
+
+lcdfT<- lcdfT %>% replace_na(list(mths_since_last_delinq=median(lcdfT$mths_since_last_delinq, na.rm=TRUE), bc_open_to_buy=median(lcdfT$bc_open_to_buy, na.rm=TRUE), mo_sin_old_il_acct=median(lcdfT$mo_sin_old_il_acct, na.rm=TRUE), mths_since_recent_bc=median(lcdfT$mths_since_recent_bc, na.rm=TRUE), mths_since_recent_inq=median(lcdfT$mths_since_recent_inq, na.rm=TRUE), num_tl_120dpd_2m = median(lcdfT$num_tl_120dpd_2m, na.rm=TRUE), percent_bc_gt_75 = median(lcdfT$percent_bc_gt_75, na.rm=TRUE), bc_util=median(lcdfT$bc_util, na.rm=TRUE)))
+
+
+
+colMeans(is.na(lcdfT))[colMeans(is.na(lcdfT))>0]
+#there are still missing values in a few columns
+
+
+#Variables with missing values
+nm<-names(lcdfT)[colMeans(is.na(lcdfT))>0]
+glimpse(lcdfT %>% select(nm))
+# these are all numeric variables  
+
+#To replace the few missing values in a column by the column median values
+
+lcx <- lcdfT  #copy to lcx
+lcx<- lcx %>% mutate_if(is.numeric,  ~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))
+# replacing missing values with median value in that column
+
+
+dim(lcdf)  #how many variables left 
+
+
+#Treating missing NA values
+
+#missing value proportions in each column
+colMeans(is.na(lcdfT))
+# for only those columns where there are missing values
+colMeans(is.na(lcdfT))[colMeans(is.na(lcdfT))>0]
+
+#remove variables which have more than 60% missing values
+nm<-names(lcdfT)[colMeans(is.na(lcdfT))>0.6]
+lcdfT <- lcdfT %>% select(-nm)
+
+
+
+
+
+####
+
+#missing value proportions in each column
+colMeans(is.na(lcdfT))
+# or, get only those columns where there are missing values
+colMeans(is.na(lcdfT))[colMeans(is.na(lcdfT))>0]
+
+#remove variables which have more than, for example, 60% missing values
+nm<-names(lcdfT)[colMeans(is.na(lcdfT))>0.6]
+lcdfT <- lcdfT %>% select(-nm)
+
+
+
+#Drop some variables for potential leakage, others
+#Drop some other columns which are not useful and those which will cause 'leakage'
+
+lcdfT <- lcdfT %>% select(-c( 
+                           funded_amnt_inv, term, emp_title, pymnt_plan,hardship_flag, title, zip_code, 
+                           title, out_prncp, out_prncp_inv,total_pymnt, total_pymnt_inv, total_rec_prncp,
+                           total_rec_int,total_rec_late_fee, recoveries, collection_recovery_fee, 
+                           last_pymnt_d, last_pymnt_amnt, last_credit_pull_d, policy_code))
+
+lcdfT<-lcdfT %>% select(-c(installment,emp_length,verification_status,issue_d))
+
+lcdfT<-lcdfT %>% select(-c(num_tl_30dpd,acc_now_delinq,chargeoff_within_12_mths,
+                         num_tl_90g_dpd_24m,delinq_amnt,tax_liens,pub_rec,delinq_2yrs,
+                         initial_list_status,tot_coll_amt,num_accts_ever_120_pd,mths_since_last_delinq,
+                         mths_since_recent_inq,percent_bc_gt_75,debt_settlement_flag,earliest_cr_line,
+                         pub_rec_bankruptcies, application_type,
+                         inq_last_6mths,collections_12_mths_ex_med,mo_sin_old_il_acct))
+
+
+
+
+ncol(lcdfT)
+
+
+
+
+#mths_since_last_delinq: has 48% missings, these pertain to no delinquincy, so replace by max value (176) 
+#or a value higher than the max (500) -- we will try this out on a temporary dataset lcx with the attributes 
+#that have misisng values
+
+lcx<-lcdfT[, c(nm)]
+colMeans(is.na(lcx))[colMeans(is.na(lcx))>0]
+
+lcdfT<- lcdfT %>% replace_na(list(mths_since_last_delinq = 500))
+#For revol_util, suppose we want to replace the misisng values by the median
+lcx<- lcx %>% replace_na(list(revol_util=median(lcx$revol_util, na.rm=TRUE)))
+
+#Similarly for the other variables
+#If we are sure this is working and what we want, can replace the missing values on the lcdf dataset
+lcdfT<- lcdfT %>% replace_na(list(mths_since_last_delinq=500))  
+lcdfT<- lcdfT %>% replace_na(list(mths_since_last_delinq=500, revol_util=median(lcdfT$revol_util, na.rm=TRUE)))
+
+
+
+
+
+
+
+
+
+
+library(ranger)
+library(tidyverse)
+library(tidyr)
+
+lcdfT %>% drop_na(tot_cur_bal)
+
+lcdfT[!is.na(lcdfT$emp_title),]
+
+lcdfT[complete.cases(lcdfT$emp_title),]
+
+na.omit(lcdfT)
+
+lcdfT[complete.cases(lcdfT), ]
+
+options(max.print=9999999)
+
+lcdfT$dti = lcdfT$dti[!37207,]
+
+lcdfT <- lcdfT[-c(37207),,drop=F]
+
+
+lcdfT<- lcdfT %>% replace_na(list(dti=median(lcdfT$dti, na.rm=TRUE),
+                                revol_util=median(lcdfT$revol_util, na.rm=TRUE),
+                                tot_coll_amt=median(lcdfT$tot_coll_amt, na.rm=TRUE),
+                                tot_cur_bal=median(lcdfT$tot_cur_bal, na.rm=TRUE),
+                                total_rev_hi_lim=median(lcdfT$total_rev_hi_lim, na.rm=TRUE),
+                                mo_sin_old_rev_tl_op=median(lcdfT$mo_sin_old_rev_tl_op, na.rm=TRUE)))
+
+
+
+TRNPROP = 0.75  
+#proportion of examples in the training sample
+
+nr<-nrow(lcdf)
+trnIndex<- sample(1:nr, size = round(TRNPROP * nr), replace=FALSE)
+
+varsOmit <- c('annRet', 'funded_amnt', 'loan_amnt', 'int_rate', 'sub_grade', 'grade', 'actualReturn', 'actualTerm')
+
+lcdfT <- lcdfT %>% select(-all_of(varsOmit))
+
+lcdfTTrn <- lcdfT[trnIndex, ]
+lcdfTTst <- lcdfT[-trnIndex, ]
+
+nm<-names(lcdfTTrn)[colMeans(is.na(lcdfTTrn))>0]
+View(nm)
+lcdfTTrn<- lcdfTTrn %>% select(-nm)
+lcdfTTst<- lcdfTTst %>% select(-nm)
+lcdfT <- lcdfT %>% select(-nm)
+lcdfTTrn$grade <- as.factor(lcdfTTrn$grade)
+lcdfTTrn$sub_grade <- as.factor(lcdfTTrn$sub_grade)
+lcdfTTrn$home_ownership <- as.factor(lcdfTTrn$home_ownership)
+lcdfTTrn$purpose <- as.factor(lcdfTTrn$purpose)
+lcdfTTrn$addr_state <- as.factor(lcdfTTrn$addr_state)
+
+lcdfTTrn$loan_status
+
+colSums((is.na(lcdfT)))
+
+
+
+rfModel_Ret <- ranger(actualReturn ~., data=subset(lcdfTTrn, num.trees =200,importance = 'permutation')
+
+rfModel1 <- ranger(loan_status ~., data=lcdfTrn, num.trees = 200, importance='permutation', probability = TRUE)
+
+rfPredRet_trn<- predict(rfModel_Ret, lcdfTTrn)
+
+sqrt(mean( (rfPredRet_trn$predictions - lcdfTTrn$actualReturn)^2))
+#sqrt(mean( ( (predict(rfModel_Ret, lcdfTst))$predictions - lcdfTst$actualReturn)^2))
+
+plot ( (predict(rfModel_Ret, lcdfTTrn))$predictions, lcdfTTrn$actualReturn)
+plot ( (predict(rfModel_Ret, lcdfTTst))$predictions, lcdfTTst$actualReturn)
+
+
+
+#Performance by deciles
+predRet_Trn <- lcdfTrn %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(predRet=(predict(rfModel_Ret, lcdfTrn))$predictions)
+predRet_Trn <- predRet_Trn %>% mutate(tile=ntile(-predRet, 10))
+predRet_Trn %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(predRet), numDefaults=sum(loan_status=="Charged Off"), 
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" 
+), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+library(glmnet)
+
+xD<-lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -actualReturn)
+
+glmRet_cv<- cv.glmnet(data.matrix(xD), lcdfTrn$actualReturn, family="gaussian")
+
+predRet_Trn <- lcdfTrn %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) 
+%>% mutate(predRet= predict(glmRet_cv, data.matrix(lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -actualReturn)),
+s="lambda.min" ) )
+
+predRet_Trn <- predRet_Trn %>% mutate(tile=ntile(-predRet, 10))
+
+predRet_Trn %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(predRet), numDefaults=sum(loan_status=="Charged Off"), 
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+#Split data into training, test subsets, balance the training data
+lcdfSplit<-initial_split(lcdf, prop=0.7) #from rsample package (with tidyverse) 
+lcdfTrn<-training(lcdfSplit)
+lcdfTst<-testing(lcdfSplit)
+
+#balancing cases in the training data
+library(ROSE)
+
+ovun.sample(formula, data, method="both", N, p=0.5, subset=options("subset")$subset, 
+na.action=options("na.action")$na.action, seed)
+
+us_lcdfTrn<-ovun.sample(loan_status~., data = as.data.frame(lcdfTrn), na.action = na.pass, method="under", p=0.5)$data
+
+os_lcdfTrn<-ovun.sample(loan_status~., data = as.data.frame(lcdfTrn), na.action = na.pass, method="over", p=0.5)$data
+
+bs_lcdfTrn<-ovun.sample(loan_status~., data = as.data.frame(lcdfTrn), na.action = na.pass, method="both", p=0.5)$data
+
+bs_lcdfTrn %>% group_by(loan_status) %>% count()
+
+
+
+library (ROSE)
+us_lcdfTrn<-ovun.sample(loan_status~., data = as.data.frame(lcdfTrn), na.action = na.pass, method="under", p=0.5)$data
+dim(lcdfTrn)
+[1] 46312 66
+dim(us_lcdfTrn)
+[1] 13653 66
+us_lcdfTrn %>% group_by(loan_status) %>% tally()
+
+os_lcdfTrn<-ovun.sample(loan_status~., data = as.data.frame(lcdfTrn), na.action = na.pass, method="over", p=0.5)$data
+dim(os_lcdfTrn)
+[1] 78734 66
+os_lcdfTrn %>% group_by(loan_status) %>% tally()
+
+bs_lcdfTrn<-ovun.sample(loan_status~., data = as.data.frame(lcdfTrn), na.action = na.pass, method="both", p=0.5)$data
+dim(bs_lcdfTrn)
+[1] 46312 66
+bs_lcdfTrn %>% group_by(loan_status) %>% tally()
+
+
+<!-- Loan Status Model -->
+
+
+xpredTst<-predict(xgb_lsM1, dxTst)
+scoreTst_xgb_ls <- lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(score=xpredTst)
+scoreTst_xgb_ls <- scoreTst_xgb_ls %>% mutate(tile=ntile(-score, 10))
+scoreTst_xgb_ls %>% group_by(tile) %>% summarise(count=n(), avgSc=mean(score), numDefaults=sum(loan_status=="Charged Off"), 
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), 
+totB=sum(grade=="B" ), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+predXgbRet_Tst <- lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% 
+mutate( predXgbRet=predict(xgbr_Mr, subset(ohlcdfTst,select=-c(annRet, actualTerm, total_pymnt, actualReturn))) )
+predXgbRet_Tst <- predXgbRet_Tst %>% mutate(tile=ntile(-predXgbRet, 10))
+predXgbRet_Tst %>% group_by(tile) %>% summarise(count=n(), avgPredRet=mean(predXgbRet), 
+numDefaults=sum(loan_status=="Charged Off"), avgActRet=mean(actualReturn), minRet=min(actualReturn), 
+maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ), 
+totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+d=1
+
+pRetSc <- predXgbRet_Tst %>% mutate(poScore=scoreTst_xgb_ls$score)
+pRet_d <- pRetSc %>% filter(tile<=d)
+pRet_d<- pRet_d %>% mutate(tile2=ntile(-poScore, 20))
+
+pRet_d %>% group_by(tile2) %>% summarise(count=n(), avgPredRet=mean(predXgbRet), 
+numDefaults=sum(loan_status=="Charged Off"), avgActRet=mean(actualReturn), minRet=min(actualReturn), 
+maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ),
+totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+<!-- Calculate expReturn = (predicted Actual Return)*(prob of Fully Paid) and sort on this -->
+
+#considering top d decile from M2
+pRet_d<- pRet_d %>% mutate(expRet=predXgbRet*poScore)
+pRet_d<- pRet_d %>% mutate(tile2=ntile(-expRet, 20))
+pRet_d %>% group_by(tile2) %>% summarise(count=n(), avgPredRet=mean(predXgbRet), 
+numDefaults=sum(loan_status=="Charged Off"), avgActRet=mean(actualReturn), minRet=min(actualReturn), 
+maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ), 
+totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+
+<!-- Modeling loan_status on lower grade loans - rf (ranger) -->
+
+lg_lcdfTst<-lcdfTst %>% filter(grade=='C'| grade=='D'| grade== 'E'| grade== 'F'| grade== 'G')
+rf_M1_lg <- ranger(loan_status ~., data=subset(lg_lcdfTrn, select=-c(annRet, actualTerm, actualReturn)), num.trees =200, 
+probability=TRUE, importance='permutation') 
+lg_scoreTstRF <- lg_lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% 
+mutate(score=(predict(rf_M1_lg,lg_lcdfTst))$predictions[,"Fully Paid"])
+lg_scoreTstRF <- lg_scoreTstRF %>% mutate(tile=ntile(-score, 10))
+lg_scoreTstRF %>% group_by(tile) %>% summarise(count=n(), avgSc=mean(score), 
+numDefaults=sum(loan_status=="Charged Off"), avgActRet=mean(actualReturn), minRet=min(actualReturn), 
+maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ), 
+totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+
+
+
